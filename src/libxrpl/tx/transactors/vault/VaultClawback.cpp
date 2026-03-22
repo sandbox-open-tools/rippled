@@ -441,11 +441,16 @@ VaultClawback::visitInvariantEntry(
 bool
 VaultClawback::finalizeInvariants(
     STTx const& tx,
-    TER,
+    TER txResult,
     XRPAmount fee,
     ReadView const& view,
     beast::Journal const& j)
 {
+    // TODO: Invariants should run for failed transactions too, but skipping
+    // here preserves the behaviour from before the refactoring.
+    if (!isTesSuccess(txResult))
+        return true;
+
     if (invariantData_.beforeVault().empty() || invariantData_.afterVault().empty())
     {
         JLOG(j.fatal()) << "Invariant failed: vault operation succeeded without modifying a vault";

@@ -247,11 +247,16 @@ VaultWithdraw::visitInvariantEntry(
 bool
 VaultWithdraw::finalizeInvariants(
     STTx const& tx,
-    TER,
+    TER txResult,
     XRPAmount fee,
     ReadView const& view,
     beast::Journal const& j)
 {
+    // TODO: Invariants should run for failed transactions too, but skipping
+    // here preserves the behaviour from before the refactoring.
+    if (!isTesSuccess(txResult))
+        return true;
+
     if (invariantData_.beforeVault().empty() || invariantData_.afterVault().empty())
     {
         JLOG(j.fatal()) <<  //
@@ -288,8 +293,8 @@ VaultWithdraw::finalizeInvariants(
 
     if (!issuerWithdrawal)
     {
-        auto const accountDeltaAssets =
-            invariantData_.deltaAssetsTxAccount(tx, afterVault.asset, fee);
+        auto const accountDeltaAssets = invariantData_.deltaAssetsTxAccount(
+            tx[sfAccount], tx[~sfDelegate], afterVault.asset, fee);
         auto const otherAccountDelta = [&]() -> std::optional<Number> {
             if (auto const destination = tx[~sfDestination];
                 destination && *destination != tx[sfAccount])

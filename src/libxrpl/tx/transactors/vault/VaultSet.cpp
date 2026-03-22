@@ -186,11 +186,16 @@ VaultSet::visitInvariantEntry(
 bool
 VaultSet::finalizeInvariants(
     STTx const&,
-    TER,
+    TER txResult,
     XRPAmount,
     ReadView const& view,
     beast::Journal const& j)
 {
+    // TODO: Invariants should run for failed transactions too, but skipping
+    // here preserves the behaviour from before the refactoring.
+    if (!isTesSuccess(txResult))
+        return true;
+
     auto result = true;
 
     if (invariantData_.beforeVault().empty() || invariantData_.afterVault().empty())
@@ -228,10 +233,13 @@ VaultSet::finalizeInvariants(
         result = false;
     }
 
-    auto const beforeShares = invariantData_.resolveBeforeShares(
-        invariantData_.beforeVault().empty() ? VaultInvariantData::Vault{}
-                                             : invariantData_.beforeVault()[0]);
-    auto const updatedShares = invariantData_.resolveUpdatedShares(afterVault, view);
+    auto const beforeShares = invariantData_.resolveBeforeShares(invariantData_.beforeVault()[0]);
+    auto const updatedShares = [&]() -> std::optional<VaultInvariantData::Shares> {
+        if (auto s = invariantData_.resolveUpdatedShares(afterVault))
+            return s;
+        auto const sle = view.read(keylet::mptIssuance(afterVault.shareMPTID));
+        return sle ? std::optional(VaultInvariantData::Shares::make(*sle)) : std::nullopt;
+    }();
     if (beforeShares && updatedShares && beforeShares->sharesTotal != updatedShares->sharesTotal)
     {
         JLOG(j.fatal()) << "Invariant failed: set must not change shares outstanding";

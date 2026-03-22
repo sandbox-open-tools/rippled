@@ -279,11 +279,16 @@ VaultDeposit::visitInvariantEntry(
 bool
 VaultDeposit::finalizeInvariants(
     STTx const& tx,
-    TER,
+    TER txResult,
     XRPAmount fee,
     ReadView const& view,
     beast::Journal const& j)
 {
+    // TODO: Invariants should run for failed transactions too, but skipping
+    // here preserves the behaviour from before the refactoring.
+    if (!isTesSuccess(txResult))
+        return true;
+
     if (invariantData_.beforeVault().empty() || invariantData_.afterVault().empty())
     {
         JLOG(j.fatal()) <<  //
@@ -326,8 +331,8 @@ VaultDeposit::finalizeInvariants(
 
     if (!issuerDeposit)
     {
-        auto const accountDeltaAssets =
-            invariantData_.deltaAssetsTxAccount(tx, afterVault.asset, fee);
+        auto const accountDeltaAssets = invariantData_.deltaAssetsTxAccount(
+            tx[sfAccount], tx[~sfDelegate], afterVault.asset, fee);
         if (!accountDeltaAssets)
         {
             JLOG(j.fatal()) << "Invariant failed: deposit must change depositor balance";

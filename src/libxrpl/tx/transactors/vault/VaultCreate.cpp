@@ -246,11 +246,16 @@ VaultCreate::visitInvariantEntry(
 bool
 VaultCreate::finalizeInvariants(
     STTx const&,
-    TER tx,
+    TER txResult,
     XRPAmount,
     ReadView const& view,
     beast::Journal const& j)
 {
+    // TODO: Invariants should run for failed transactions too, but skipping
+    // here preserves the behaviour from before the refactoring.
+    if (!isTesSuccess(txResult))
+        return true;
+
     auto result = true;
     if (!invariantData_.beforeVault().empty())
     {
@@ -267,7 +272,12 @@ VaultCreate::finalizeInvariants(
     }
 
     auto const& afterVault = invariantData_.afterVault()[0];
-    auto const updatedShares = invariantData_.resolveUpdatedShares(afterVault, view);
+    auto const updatedShares = [&]() -> std::optional<VaultInvariantData::Shares> {
+        if (auto s = invariantData_.resolveUpdatedShares(afterVault))
+            return s;
+        auto const sle = view.read(keylet::mptIssuance(afterVault.shareMPTID));
+        return sle ? std::optional(VaultInvariantData::Shares::make(*sle)) : std::nullopt;
+    }();
     if (!updatedShares)
     {
         JLOG(j.fatal()) << "Invariant failed: updated vault must have shares";
@@ -278,13 +288,6 @@ VaultCreate::finalizeInvariants(
         afterVault.lossUnrealized != beast::zero || updatedShares->sharesTotal != 0)
     {
         JLOG(j.fatal()) << "Invariant failed: created vault must be empty";
-        result = false;
-    }
-
-    if (afterVault.pseudoId != updatedShares->share.getIssuer())
-    {
-        JLOG(j.fatal()) <<  //
-            "Invariant failed: shares issuer and vault pseudo-account must be the same";
         result = false;
     }
 

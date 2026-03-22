@@ -42,17 +42,14 @@ VaultInvariantData::Shares::make(SLE const& from)
 }
 
 void
-VaultInvariantData::visitEntry(
-    bool isDelete,
-    std::shared_ptr<SLE const> const& before,
-    std::shared_ptr<SLE const> const& after)
+VaultInvariantData::visitEntry(bool isDelete, SLE::const_ref before, SLE::const_ref after)
 {
-    // If `before` is empty, this means an object is being created,  in which
+    // If `before` is empty, this means an object is being created, in which
     // case `isDelete` must be false. Otherwise `before` and `after` are set and
     // `isDelete` indicates whether an object is being deleted or modified.
     XRPL_ASSERT(
         after != nullptr && (before != nullptr || !isDelete),
-        "xrpl::ValidVault::visitEntry : some object is available");
+        "xrpl::VaultInvariantData::visitEntry : some object is available");
 
     // Number balanceDelta will capture the difference (delta) between "before"
     // state (zero if created) and "after" state (zero if destroyed), so the
@@ -126,16 +123,6 @@ VaultInvariantData::visitEntry(
         deltas_[key] = balanceDelta * sign;
 }
 
-void
-VaultInvariantData::clear()
-{
-    afterVault_.clear();
-    afterMPTs_.clear();
-    beforeVault_.clear();
-    beforeMPTs_.clear();
-    deltas_.clear();
-}
-
 std::optional<Number>
 VaultInvariantData::deltaAssets(Asset const& vaultAsset, AccountID const& id) const
 {
@@ -165,20 +152,23 @@ VaultInvariantData::deltaAssets(Asset const& vaultAsset, AccountID const& id) co
 }
 
 std::optional<Number>
-VaultInvariantData::deltaAssetsTxAccount(STTx const& tx, Asset const& vaultAsset, XRPAmount fee)
-    const
+VaultInvariantData::deltaAssetsTxAccount(
+    AccountID const& account,
+    std::optional<AccountID> const& delegate,
+    Asset const& vaultAsset,
+    XRPAmount fee) const
 {
-    auto ret = deltaAssets(vaultAsset, tx[sfAccount]);
+    auto ret = deltaAssets(vaultAsset, account);
     // Nothing returned or not XRP transaction
     if (!ret.has_value() || !vaultAsset.native())
         return ret;
 
     // Delegated transaction; no need to compensate for fees
-    if (auto const delegate = tx[~sfDelegate]; delegate.has_value() && *delegate != tx[sfAccount])
+    if (delegate.has_value() && *delegate != account)
         return ret;
 
     *ret += fee.drops();
-    if (*ret == zero)
+    if (*ret == beast::zero)
         return std::nullopt;
 
     return ret;
@@ -200,22 +190,17 @@ VaultInvariantData::deltaShares(
 }
 
 std::optional<VaultInvariantData::Shares>
-VaultInvariantData::resolveUpdatedShares(Vault const& afterVault, ReadView const& view) const
+VaultInvariantData::resolveUpdatedShares(Vault const& afterVault) const
 {
-    // At this moment we only know that a vault is being updated and there
-    // might be some MPTokenIssuance objects which are also updated in the
-    // same transaction. Find the one matching the shares to this vault.
-    // Note, we expect updatedMPTs collection to be extremely small. For
-    // such collections linear search is faster than lookup.
+    // Find the shares MPTokenIssuance that was modified in the same
+    // transaction. Note, we expect afterMPTs_ to be extremely small.
+    // For such collections linear search is faster than lookup.
     for (auto const& e : afterMPTs_)
     {
         if (e.share.getMptID() == afterVault.shareMPTID)
             return e;
     }
-
-    auto const sleShares = view.read(keylet::mptIssuance(afterVault.shareMPTID));
-
-    return sleShares ? std::optional<Shares>(Shares::make(*sleShares)) : std::nullopt;
+    return std::nullopt;
 }
 
 std::optional<VaultInvariantData::Shares>
@@ -224,7 +209,7 @@ VaultInvariantData::resolveBeforeShares(Vault const& beforeVault) const
     for (auto const& e : beforeMPTs_)
     {
         if (e.share.getMptID() == beforeVault.shareMPTID)
-            return std::move(e);
+            return e;
     }
     return std::nullopt;
 }

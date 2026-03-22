@@ -214,11 +214,16 @@ VaultDelete::visitInvariantEntry(
 bool
 VaultDelete::finalizeInvariants(
     STTx const&,
-    TER,
+    TER txResult,
     XRPAmount,
     ReadView const&,
     beast::Journal const& j)
 {
+    // TODO: Invariants should run for failed transactions too, but skipping
+    // here preserves the behaviour from before the refactoring.
+    if (!isTesSuccess(txResult))
+        return true;
+
     // VaultDelete must have a before state and no after state
     if (invariantData_.beforeVault().empty())
     {
