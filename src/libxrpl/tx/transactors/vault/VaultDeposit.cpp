@@ -269,21 +269,133 @@ VaultDeposit::doApply()
 
 void
 VaultDeposit::visitInvariantEntry(
-    bool,
-    std::shared_ptr<SLE const> const&,
-    std::shared_ptr<SLE const> const&)
+    bool isDelete,
+    std::shared_ptr<SLE const> const& before,
+    std::shared_ptr<SLE const> const& after)
 {
+    invariantData_.visitEntry(isDelete, before, after);
 }
 
 bool
 VaultDeposit::finalizeInvariants(
-    STTx const&,
+    STTx const& tx,
     TER,
-    XRPAmount,
-    ReadView const&,
-    beast::Journal const&)
+    XRPAmount fee,
+    ReadView const& view,
+    beast::Journal const& j)
 {
-    return true;
+    if (invariantData_.beforeVault().empty() || invariantData_.afterVault().empty())
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: vault operation succeeded without modifying a vault";
+        return false;
+    }
+
+    auto result = true;
+    auto const& beforeVault = invariantData_.beforeVault()[0];
+    auto const& afterVault = invariantData_.afterVault()[0];
+
+    auto const vaultDeltaAssets = invariantData_.deltaAssets(afterVault.asset, afterVault.pseudoId);
+
+    if (!vaultDeltaAssets)
+    {
+        JLOG(j.fatal()) << "Invariant failed: deposit must change vault balance";
+        return false;
+    }
+
+    if (*vaultDeltaAssets > tx[sfAmount])
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: deposit must not change vault balance by more than deposited amount";
+        result = false;
+    }
+
+    if (*vaultDeltaAssets <= beast::zero)
+    {
+        JLOG(j.fatal()) << "Invariant failed: deposit must increase vault balance";
+        result = false;
+    }
+
+    // Any payments (including deposits) made by the issuer
+    // do not change their balance, but create funds instead.
+    bool const issuerDeposit = [&]() -> bool {
+        if (afterVault.asset.native())
+            return false;
+        return tx[sfAccount] == afterVault.asset.getIssuer();
+    }();
+
+    if (!issuerDeposit)
+    {
+        auto const accountDeltaAssets =
+            invariantData_.deltaAssetsTxAccount(tx, afterVault.asset, fee);
+        if (!accountDeltaAssets)
+        {
+            JLOG(j.fatal()) << "Invariant failed: deposit must change depositor balance";
+            return false;
+        }
+
+        if (*accountDeltaAssets >= beast::zero)
+        {
+            JLOG(j.fatal()) << "Invariant failed: deposit must decrease depositor balance";
+            result = false;
+        }
+
+        if (*accountDeltaAssets * -1 != *vaultDeltaAssets)
+        {
+            JLOG(j.fatal()) <<  //
+                "Invariant failed: deposit must change vault and depositor balance by equal amount";
+            result = false;
+        }
+    }
+
+    if (afterVault.assetsMaximum > beast::zero && afterVault.assetsTotal > afterVault.assetsMaximum)
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: deposit assets outstanding must not exceed assets maximum";
+        result = false;
+    }
+
+    auto const accountDeltaShares =
+        invariantData_.deltaShares(afterVault.pseudoId, afterVault.shareMPTID, tx[sfAccount]);
+    if (!accountDeltaShares)
+    {
+        JLOG(j.fatal()) << "Invariant failed: deposit must change depositor shares";
+        return false;
+    }
+
+    if (*accountDeltaShares <= beast::zero)
+    {
+        JLOG(j.fatal()) << "Invariant failed: deposit must increase depositor shares";
+        result = false;
+    }
+
+    auto const vaultDeltaShares =
+        invariantData_.deltaShares(afterVault.pseudoId, afterVault.shareMPTID, afterVault.pseudoId);
+    if (!vaultDeltaShares || *vaultDeltaShares == beast::zero)
+    {
+        JLOG(j.fatal()) << "Invariant failed: deposit must change vault shares";
+        return false;
+    }
+
+    if (*vaultDeltaShares * -1 != *accountDeltaShares)
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: deposit must change depositor and vault shares by equal amount";
+        result = false;
+    }
+
+    if (beforeVault.assetsTotal + *vaultDeltaAssets != afterVault.assetsTotal)
+    {
+        JLOG(j.fatal()) << "Invariant failed: deposit and assets outstanding must add up";
+        result = false;
+    }
+    if (beforeVault.assetsAvailable + *vaultDeltaAssets != afterVault.assetsAvailable)
+    {
+        JLOG(j.fatal()) << "Invariant failed: deposit and assets available must add up";
+        result = false;
+    }
+
+    return result;
 }
 
 }  // namespace xrpl

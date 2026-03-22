@@ -1,11 +1,14 @@
 #pragma once
 
 #include <xrpl/tx/Transactor.h>
+#include <xrpl/tx/transactors/vault/VaultInvariantData.h>
 
 namespace xrpl {
 
 class VaultSet : public Transactor
 {
+    VaultInvariantData invariantData_;
+
 public:
     static constexpr ConsequencesFactoryType ConsequencesFactory{Normal};
 

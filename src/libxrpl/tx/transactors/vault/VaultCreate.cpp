@@ -1,3 +1,5 @@
+#include <xrpl/tx/transactors/vault/VaultCreate.h>
+//
 #include <xrpl/ledger/View.h>
 #include <xrpl/protocol/Asset.h>
 #include <xrpl/protocol/Feature.h>
@@ -10,9 +12,9 @@
 #include <xrpl/protocol/STTakesAsset.h>
 #include <xrpl/protocol/TER.h>
 #include <xrpl/protocol/TxFlags.h>
+#include <xrpl/tx/invariants/InvariantCheckPrivilege.h>
 #include <xrpl/tx/transactors/token/MPTokenAuthorize.h>
 #include <xrpl/tx/transactors/token/MPTokenIssuanceCreate.h>
-#include <xrpl/tx/transactors/vault/VaultCreate.h>
 
 namespace xrpl {
 
@@ -234,16 +236,85 @@ VaultCreate::doApply()
 
 void
 VaultCreate::visitInvariantEntry(
-    bool,
-    std::shared_ptr<SLE const> const&,
-    std::shared_ptr<SLE const> const&)
+    bool isDelete,
+    std::shared_ptr<SLE const> const& before,
+    std::shared_ptr<SLE const> const& after)
 {
+    invariantData_.visitEntry(isDelete, before, after);
 }
 
 bool
-VaultCreate::finalizeInvariants(STTx const&, TER, XRPAmount, ReadView const&, beast::Journal const&)
+VaultCreate::finalizeInvariants(
+    STTx const&,
+    TER tx,
+    XRPAmount,
+    ReadView const& view,
+    beast::Journal const& j)
 {
-    return true;
+    auto result = true;
+    if (!invariantData_.beforeVault().empty())
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: create operation must not have updated a vault";
+        result = false;
+    }
+
+    if (invariantData_.afterVault().empty())
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: vault operation succeeded without modifying a vault";
+        return false;
+    }
+
+    auto const& afterVault = invariantData_.afterVault()[0];
+    auto const updatedShares = invariantData_.resolveUpdatedShares(afterVault, view);
+    if (!updatedShares)
+    {
+        JLOG(j.fatal()) << "Invariant failed: updated vault must have shares";
+        return false;
+    }
+
+    if (afterVault.assetsAvailable != beast::zero || afterVault.assetsTotal != beast::zero ||
+        afterVault.lossUnrealized != beast::zero || updatedShares->sharesTotal != 0)
+    {
+        JLOG(j.fatal()) << "Invariant failed: created vault must be empty";
+        result = false;
+    }
+
+    if (afterVault.pseudoId != updatedShares->share.getIssuer())
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: shares issuer and vault pseudo-account must be the same";
+        result = false;
+    }
+
+    if (afterVault.pseudoId != updatedShares->share.getIssuer())
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: shares issuer and vault pseudo-account must be the same";
+        result = false;
+    }
+
+    auto const sleSharesIssuer = view.read(keylet::account(updatedShares->share.getIssuer()));
+    if (!sleSharesIssuer)
+    {
+        JLOG(j.fatal()) << "Invariant failed: shares issuer must exist";
+        return false;
+    }
+
+    if (!isPseudoAccount(sleSharesIssuer))
+    {
+        JLOG(j.fatal()) << "Invariant failed: shares issuer must be a pseudo-account";
+        result = false;
+    }
+
+    if (auto const vaultId = (*sleSharesIssuer)[~sfVaultID]; !vaultId || *vaultId != afterVault.key)
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: shares issuer pseudo-account must point back to the vault";
+        result = false;
+    }
+    return result;
 }
 
 }  // namespace xrpl

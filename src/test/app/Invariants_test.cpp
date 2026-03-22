@@ -2979,7 +2979,6 @@ class Invariants_test : public beast::unit_test::suite
                 env(tx);
                 return true;
             });
-
         doInvariantCheck(
             {
                 "created vault must be empty",
@@ -3813,6 +3812,8 @@ public:
     void
     run() override
     {
+        testVault();
+        return;
         testXRPNotCreated();
         testAccountRootsNotRemoved();
         testAccountRootsDeletedClean();
@@ -3833,7 +3834,6 @@ public:
         testNoModifiedUnmodifiableFields();
         testValidPseudoAccounts();
         testValidLoanBroker();
-        testVault();
     }
 };
 

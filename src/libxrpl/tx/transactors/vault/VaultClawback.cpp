@@ -431,21 +431,104 @@ VaultClawback::doApply()
 
 void
 VaultClawback::visitInvariantEntry(
-    bool,
-    std::shared_ptr<SLE const> const&,
-    std::shared_ptr<SLE const> const&)
+    bool isDelete,
+    std::shared_ptr<SLE const> const& before,
+    std::shared_ptr<SLE const> const& after)
 {
+    invariantData_.visitEntry(isDelete, before, after);
 }
 
 bool
 VaultClawback::finalizeInvariants(
-    STTx const&,
+    STTx const& tx,
     TER,
-    XRPAmount,
-    ReadView const&,
-    beast::Journal const&)
+    XRPAmount fee,
+    ReadView const& view,
+    beast::Journal const& j)
 {
-    return true;
+    if (invariantData_.beforeVault().empty() || invariantData_.afterVault().empty())
+    {
+        JLOG(j.fatal()) << "Invariant failed: vault operation succeeded without modifying a vault";
+        return false;
+    }
+
+    auto const& beforeVault = invariantData_.beforeVault()[0];
+    auto const& afterVault = invariantData_.afterVault()[0];
+    auto const beforeShares = invariantData_.resolveBeforeShares(beforeVault);
+
+    if (afterVault.asset.native() || afterVault.asset.getIssuer() != tx[sfAccount])
+    {
+        // The owner can use clawback to force-burn shares when the
+        // vault is empty but there are outstanding shares
+        if (!(beforeShares && beforeShares->sharesTotal > 0 &&
+              VaultInvariantData::vaultHoldsNoAssets(beforeVault) &&
+              beforeVault.owner == tx[sfAccount]))
+        {
+            JLOG(j.fatal()) << "Invariant failed: clawback may only be performed by the asset "
+                               "issuer, or by the vault owner of an empty vault";
+            return false;
+        }
+    }
+
+    auto result = true;
+
+    auto const vaultDeltaAssets = invariantData_.deltaAssets(afterVault.asset, afterVault.pseudoId);
+    if (vaultDeltaAssets)
+    {
+        if (*vaultDeltaAssets >= beast::zero)
+        {
+            JLOG(j.fatal()) << "Invariant failed: clawback must decrease vault balance";
+            result = false;
+        }
+
+        if (beforeVault.assetsTotal + *vaultDeltaAssets != afterVault.assetsTotal)
+        {
+            JLOG(j.fatal()) << "Invariant failed: clawback and assets outstanding must add up";
+            result = false;
+        }
+
+        if (beforeVault.assetsAvailable + *vaultDeltaAssets != afterVault.assetsAvailable)
+        {
+            JLOG(j.fatal()) << "Invariant failed: clawback and assets available must add up";
+            result = false;
+        }
+    }
+    else if (!VaultInvariantData::vaultHoldsNoAssets(beforeVault))
+    {
+        JLOG(j.fatal()) << "Invariant failed: clawback must change vault balance";
+        return false;
+    }
+
+    auto const accountDeltaShares =
+        invariantData_.deltaShares(afterVault.pseudoId, afterVault.shareMPTID, tx[sfHolder]);
+    if (!accountDeltaShares)
+    {
+        JLOG(j.fatal()) << "Invariant failed: clawback must change holder shares";
+        return false;
+    }
+
+    if (*accountDeltaShares >= beast::zero)
+    {
+        JLOG(j.fatal()) << "Invariant failed: clawback must decrease holder shares";
+        result = false;
+    }
+
+    auto const vaultDeltaShares =
+        invariantData_.deltaShares(afterVault.pseudoId, afterVault.shareMPTID, afterVault.pseudoId);
+    if (!vaultDeltaShares || *vaultDeltaShares == beast::zero)
+    {
+        JLOG(j.fatal()) << "Invariant failed: clawback must change vault shares";
+        return false;
+    }
+
+    if (*vaultDeltaShares * -1 != *accountDeltaShares)
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: clawback must change holder and vault shares by equal amount";
+        result = false;
+    }
+
+    return result;
 }
 
 }  // namespace xrpl

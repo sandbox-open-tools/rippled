@@ -176,16 +176,69 @@ VaultSet::doApply()
 
 void
 VaultSet::visitInvariantEntry(
-    bool,
-    std::shared_ptr<SLE const> const&,
-    std::shared_ptr<SLE const> const&)
+    bool isDelete,
+    std::shared_ptr<SLE const> const& before,
+    std::shared_ptr<SLE const> const& after)
 {
+    invariantData_.visitEntry(isDelete, before, after);
 }
 
 bool
-VaultSet::finalizeInvariants(STTx const&, TER, XRPAmount, ReadView const&, beast::Journal const&)
+VaultSet::finalizeInvariants(
+    STTx const&,
+    TER,
+    XRPAmount,
+    ReadView const& view,
+    beast::Journal const& j)
 {
-    return true;
+    auto result = true;
+
+    if (invariantData_.beforeVault().empty() || invariantData_.afterVault().empty())
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: vault operation succeeded without modifying a vault";
+        return false;
+    }
+
+    auto const& afterVault = invariantData_.afterVault()[0];
+    auto const& beforeVault = invariantData_.beforeVault()[0];
+    auto const vaultDeltaAssets = invariantData_.deltaAssets(afterVault.asset, afterVault.pseudoId);
+    if (vaultDeltaAssets)
+    {
+        JLOG(j.fatal()) << "Invariant failed: set must not change vault balance";
+        result = false;
+    }
+
+    if (beforeVault.assetsTotal != afterVault.assetsTotal)
+    {
+        JLOG(j.fatal()) << "Invariant failed: set must not change assets outstanding";
+        result = false;
+    }
+
+    if (beforeVault.assetsAvailable != afterVault.assetsAvailable)
+    {
+        JLOG(j.fatal()) << "Invariant failed: set must not change assets available";
+        result = false;
+    }
+
+    if (afterVault.assetsMaximum > beast::zero && afterVault.assetsTotal > afterVault.assetsMaximum)
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: set assets outstanding must not exceed assets maximum";
+        result = false;
+    }
+
+    auto const beforeShares = invariantData_.resolveBeforeShares(
+        invariantData_.beforeVault().empty() ? VaultInvariantData::Vault{}
+                                             : invariantData_.beforeVault()[0]);
+    auto const updatedShares = invariantData_.resolveUpdatedShares(afterVault, view);
+    if (beforeShares && updatedShares && beforeShares->sharesTotal != updatedShares->sharesTotal)
+    {
+        JLOG(j.fatal()) << "Invariant failed: set must not change shares outstanding";
+        result = false;
+    }
+
+    return result;
 }
 
 }  // namespace xrpl

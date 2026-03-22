@@ -204,16 +204,67 @@ VaultDelete::doApply()
 
 void
 VaultDelete::visitInvariantEntry(
-    bool,
-    std::shared_ptr<SLE const> const&,
-    std::shared_ptr<SLE const> const&)
+    bool isDelete,
+    std::shared_ptr<SLE const> const& before,
+    std::shared_ptr<SLE const> const& after)
 {
+    invariantData_.visitEntry(isDelete, before, after);
 }
 
 bool
-VaultDelete::finalizeInvariants(STTx const&, TER, XRPAmount, ReadView const&, beast::Journal const&)
+VaultDelete::finalizeInvariants(
+    STTx const&,
+    TER,
+    XRPAmount,
+    ReadView const&,
+    beast::Journal const& j)
 {
-    return true;
+    // VaultDelete must have a before state and no after state
+    if (invariantData_.beforeVault().empty())
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: vault deletion succeeded without modifying a vault";
+        return false;
+    }
+
+    if (!invariantData_.afterVault().empty())
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: vault deletion succeeded without deleting a vault";
+        return false;
+    }
+
+    auto const& beforeVault = invariantData_.beforeVault()[0];
+
+    // Find the deleted shares matching this vault
+    auto const deletedShares = invariantData_.resolveBeforeShares(beforeVault);
+    if (!deletedShares)
+    {
+        JLOG(j.fatal()) << "Invariant failed: deleted vault must also delete shares";
+        return false;
+    }
+
+    auto result = true;
+    if (deletedShares->sharesTotal != 0)
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: deleted vault must have no shares outstanding";
+        result = false;
+    }
+    if (beforeVault.assetsTotal != beast::zero)
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: deleted vault must have no assets outstanding";
+        result = false;
+    }
+    if (beforeVault.assetsAvailable != beast::zero)
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: deleted vault must have no assets available";
+        result = false;
+    }
+
+    return result;
 }
 
 }  // namespace xrpl

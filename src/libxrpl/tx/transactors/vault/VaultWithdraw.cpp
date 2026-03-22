@@ -237,21 +237,133 @@ VaultWithdraw::doApply()
 
 void
 VaultWithdraw::visitInvariantEntry(
-    bool,
-    std::shared_ptr<SLE const> const&,
-    std::shared_ptr<SLE const> const&)
+    bool isDelete,
+    std::shared_ptr<SLE const> const& before,
+    std::shared_ptr<SLE const> const& after)
 {
+    invariantData_.visitEntry(isDelete, before, after);
 }
 
 bool
 VaultWithdraw::finalizeInvariants(
-    STTx const&,
+    STTx const& tx,
     TER,
-    XRPAmount,
-    ReadView const&,
-    beast::Journal const&)
+    XRPAmount fee,
+    ReadView const& view,
+    beast::Journal const& j)
 {
-    return true;
+    if (invariantData_.beforeVault().empty() || invariantData_.afterVault().empty())
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: vault operation succeeded without modifying a vault";
+        return false;
+    }
+
+    auto result = true;
+    auto const& beforeVault = invariantData_.beforeVault()[0];
+    auto const& afterVault = invariantData_.afterVault()[0];
+
+    auto const vaultDeltaAssets = invariantData_.deltaAssets(afterVault.asset, afterVault.pseudoId);
+
+    if (!vaultDeltaAssets)
+    {
+        JLOG(j.fatal()) << "Invariant failed: withdrawal must change vault balance";
+        return false;
+    }
+
+    if (*vaultDeltaAssets >= beast::zero)
+    {
+        JLOG(j.fatal()) << "Invariant failed: withdrawal must decrease vault balance";
+        result = false;
+    }
+
+    // Any payments (including withdrawal) going to the issuer
+    // do not change their balance, but destroy funds instead.
+    bool const issuerWithdrawal = [&]() -> bool {
+        if (afterVault.asset.native())
+            return false;
+        auto const destination = tx[~sfDestination].value_or(tx[sfAccount]);
+        return destination == afterVault.asset.getIssuer();
+    }();
+
+    if (!issuerWithdrawal)
+    {
+        auto const accountDeltaAssets =
+            invariantData_.deltaAssetsTxAccount(tx, afterVault.asset, fee);
+        auto const otherAccountDelta = [&]() -> std::optional<Number> {
+            if (auto const destination = tx[~sfDestination];
+                destination && *destination != tx[sfAccount])
+                return invariantData_.deltaAssets(afterVault.asset, *destination);
+            return std::nullopt;
+        }();
+
+        if (accountDeltaAssets.has_value() == otherAccountDelta.has_value())
+        {
+            JLOG(j.fatal()) <<  //
+                "Invariant failed: withdrawal must change one destination balance";
+            return false;
+        }
+
+        auto const destinationDelta = accountDeltaAssets ? *accountDeltaAssets : *otherAccountDelta;
+
+        if (destinationDelta <= beast::zero)
+        {
+            JLOG(j.fatal()) << "Invariant failed: withdrawal must increase destination balance";
+            result = false;
+        }
+
+        if (*vaultDeltaAssets * -1 != destinationDelta)
+        {
+            JLOG(j.fatal()) <<  //
+                "Invariant failed: withdrawal must change vault and destination balance by equal "
+                "amount";
+            result = false;
+        }
+    }
+
+    auto const accountDeltaShares =
+        invariantData_.deltaShares(afterVault.pseudoId, afterVault.shareMPTID, tx[sfAccount]);
+    if (!accountDeltaShares)
+    {
+        JLOG(j.fatal()) << "Invariant failed: withdrawal must change depositor shares";
+        return false;
+    }
+
+    if (*accountDeltaShares >= beast::zero)
+    {
+        JLOG(j.fatal()) << "Invariant failed: withdrawal must decrease depositor shares";
+        result = false;
+    }
+
+    auto const vaultDeltaShares =
+        invariantData_.deltaShares(afterVault.pseudoId, afterVault.shareMPTID, afterVault.pseudoId);
+    if (!vaultDeltaShares || *vaultDeltaShares == beast::zero)
+    {
+        JLOG(j.fatal()) << "Invariant failed: withdrawal must change vault shares";
+        return false;
+    }
+
+    if (*vaultDeltaShares * -1 != *accountDeltaShares)
+    {
+        JLOG(j.fatal()) <<  //
+            "Invariant failed: withdrawal must change depositor and vault shares by equal amount";
+        result = false;
+    }
+
+    // Note, vaultBalance is negative (see check above)
+    if (beforeVault.assetsTotal + *vaultDeltaAssets != afterVault.assetsTotal)
+    {
+        JLOG(j.fatal()) << "Invariant failed: withdrawal and assets outstanding must add up";
+        result = false;
+    }
+
+    if (beforeVault.assetsAvailable + *vaultDeltaAssets != afterVault.assetsAvailable)
+    {
+        JLOG(j.fatal()) << "Invariant failed: withdrawal and assets available must add up";
+        result = false;
+    }
+
+    return result;
 }
 
 }  // namespace xrpl
