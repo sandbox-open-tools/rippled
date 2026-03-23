@@ -3812,8 +3812,6 @@ public:
     void
     run() override
     {
-        testVault();
-        return;
         testXRPNotCreated();
         testAccountRootsNotRemoved();
         testAccountRootsDeletedClean();
@@ -3834,6 +3832,7 @@ public:
         testNoModifiedUnmodifiableFields();
         testValidPseudoAccounts();
         testValidLoanBroker();
+        testVault();
     }
 };
 
