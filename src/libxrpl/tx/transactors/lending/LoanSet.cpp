@@ -1,6 +1,7 @@
 #include <xrpl/tx/transactors/lending/LoanSet.h>
 //
-#include <xrpl/ledger/CredentialHelpers.h>
+#include <xrpl/ledger/helpers/AccountRootHelpers.h>
+#include <xrpl/ledger/helpers/TokenHelpers.h>
 #include <xrpl/protocol/STTakesAsset.h>
 #include <xrpl/protocol/TxFlags.h>
 #include <xrpl/tx/transactors/lending/LendingHelpers.h>
@@ -332,7 +333,8 @@ LoanSet::preclaim(PreclaimContext const& ctx)
         return ret;
     }
 
-    if (ctx.view.rules().enabled(fixLendingProtocolV1_1) && brokerSle->isFlag(lsfLoanBrokerPrivate))
+    if (ctx.view.rules().enabled(featureLendingProtocolV1_1) &&
+        brokerSle->isFlag(lsfLoanBrokerPrivate))
     {
         auto const domainID = brokerSle->at(~sfDomainID);
         if (!domainID)

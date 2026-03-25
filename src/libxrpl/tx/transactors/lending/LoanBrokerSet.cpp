@@ -1,5 +1,7 @@
 #include <xrpl/tx/transactors/lending/LoanBrokerSet.h>
 //
+#include <xrpl/ledger/helpers/AccountRootHelpers.h>
+#include <xrpl/ledger/helpers/TokenHelpers.h>
 #include <xrpl/protocol/STTakesAsset.h>
 #include <xrpl/protocol/TxFlags.h>
 #include <xrpl/tx/transactors/lending/LendingHelpers.h>
@@ -30,7 +32,7 @@ LoanBrokerSet::preflight(PreflightContext const& ctx)
     if (!validNumericRange(tx[~sfDebtMaximum], Number(maxMPTokenAmount), Number(0)))
         return temINVALID;
 
-    if (!ctx.rules.enabled(fixLendingProtocolV1_1))
+    if (!ctx.rules.enabled(featureLendingProtocolV1_1))
     {
         if (tx.isFlag(tfLoanBrokerPrivate) || tx.isFieldPresent(sfDomainID))
         {
@@ -50,7 +52,7 @@ LoanBrokerSet::preflight(PreflightContext const& ctx)
         if (tx[sfLoanBrokerID] == beast::zero)
             return temINVALID;
 
-        if (ctx.rules.enabled(fixLendingProtocolV1_1))
+        if (ctx.rules.enabled(featureLendingProtocolV1_1))
         {
             // Cannot change private flag on existing broker
             if (tx.isFlag(tfLoanBrokerPrivate))
@@ -62,7 +64,7 @@ LoanBrokerSet::preflight(PreflightContext const& ctx)
     else
     {
         // We're creating a new LoanBroker.
-        if (ctx.rules.enabled(fixLendingProtocolV1_1))
+        if (ctx.rules.enabled(featureLendingProtocolV1_1))
         {
             auto const domainID = tx.at(~sfDomainID);
             if (domainID)
@@ -111,7 +113,7 @@ LoanBrokerSet::getValueFields()
 std::uint32_t
 LoanBrokerSet::getFlagsMask(PreflightContext const& ctx)
 {
-    if (ctx.rules.enabled(fixLendingProtocolV1_1))
+    if (ctx.rules.enabled(featureLendingProtocolV1_1))
     {
         return tfLoanSetMask;
     }
@@ -140,7 +142,7 @@ LoanBrokerSet::preclaim(PreclaimContext const& ctx)
         return tecNO_PERMISSION;
     }
 
-    if (ctx.view.rules().enabled(fixLendingProtocolV1_1))
+    if (ctx.view.rules().enabled(featureLendingProtocolV1_1))
     {
         auto const domainID = tx[~sfDomainID];
         if (domainID && *domainID != beast::zero)
@@ -186,7 +188,7 @@ LoanBrokerSet::preclaim(PreclaimContext const& ctx)
             }
         }
 
-        if (ctx.view.rules().enabled(fixLendingProtocolV1_1))
+        if (ctx.view.rules().enabled(featureLendingProtocolV1_1))
         {
             auto const domainID = tx[~sfDomainID];
             if (!sleBroker->isFlag(lsfLoanBrokerPrivate) && domainID)
@@ -250,7 +252,7 @@ LoanBrokerSet::doApply()
         if (auto const debtMax = tx[~sfDebtMaximum])
             broker->at(sfDebtMaximum) = *debtMax;
 
-        if (ctx_.view().rules().enabled(fixLendingProtocolV1_1) &&
+        if (ctx_.view().rules().enabled(featureLendingProtocolV1_1) &&
             broker->isFlag(lsfLoanBrokerPrivate))
         {
             if (auto const domainID = tx[~sfDomainID])
@@ -337,7 +339,7 @@ LoanBrokerSet::doApply()
         if (auto const coverLiq = tx[~sfCoverRateLiquidation])
             broker->at(sfCoverRateLiquidation) = *coverLiq;
 
-        if (ctx_.view().rules().enabled(fixLendingProtocolV1_1))
+        if (ctx_.view().rules().enabled(featureLendingProtocolV1_1))
         {
             if (tx.isFlag(tfLoanBrokerPrivate))
             {

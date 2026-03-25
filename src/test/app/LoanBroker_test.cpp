@@ -1818,10 +1818,10 @@ class LoanBroker_test : public beast::unit_test::suite
         auto const domainId = pdomain::getNewDomain(env.meta());
         BEAST_EXPECT(domainId != beast::zero);
 
-        // Test 1: Cannot set tfLoanBrokerPrivate without fixLendingProtocolV1_1
+        // Test 1: Cannot set tfLoanBrokerPrivate without featureLendingProtocolV1_1
         {
             Env envNoFix{*this};
-            envNoFix.disableFeature(fixLendingProtocolV1_1);
+            envNoFix.disableFeature(featureLendingProtocolV1_1);
             Vault vault2{envNoFix};
 
             envNoFix.fund(XRP(100'000), issuer, alice);
@@ -1838,7 +1838,7 @@ class LoanBroker_test : public beast::unit_test::suite
             // tfLoanBrokerPrivate should be disabled
             envNoFix(set(alice, vaultKeylet2.key, tfLoanBrokerPrivate), ter(temINVALID_FLAG));
 
-            // sfDomainID should also be disabled without fixLendingProtocolV1_1
+            // sfDomainID should also be disabled without featureLendingProtocolV1_1
             envNoFix(set(alice, vaultKeylet2.key), domainID(domainId), ter(temDISABLED));
         }
 
