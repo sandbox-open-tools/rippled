@@ -395,7 +395,7 @@ LoanSet::doApply()
         return tefBAD_LEDGER;  // LCOV_EXCL_LINE
     }
 
-    if (brokerSle->isFlag(lsfLoanBrokerPrivate))
+    if (ctx_.view().rules().enabled(featureLendingProtocolV1_1) && brokerSle->isFlag(lsfLoanBrokerPrivate))
     {
         auto const domainID = brokerSle->at(~sfDomainID);
         if (!domainID)
