@@ -115,7 +115,7 @@ LoanBrokerSet::getFlagsMask(PreflightContext const& ctx)
 {
     if (ctx.rules.enabled(featureLendingProtocolV1_1))
     {
-        return tfLoanSetMask;
+        return tfLoanBrokerSetMask;
     }
     return tfUniversalMask;
 }
